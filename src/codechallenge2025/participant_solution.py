@@ -130,14 +130,38 @@ def compute_locus_lr(
 
     if shared:
         # Direct match - compute LR using Paternity Index formula
-        # LR = transmission_prob / allele_frequency
+        # For true parent-child, child inherited one shared allele
+        # LR depends on which allele and parent's zygosity
+
         best_lr = 0.0
-        for allele in shared:
-            # Transmission probability: 1.0 if homozygous, 0.5 if heterozygous
-            trans_prob = 1.0 if len(candidate_alleles) == 1 else 0.5
-            freq = get_allele_freq(locus, allele)
-            lr = trans_prob / max(freq, 0.001)
+        for shared_allele in shared:
+            # Get non-shared alleles in query (likely from other parent)
+            non_shared_query = query_alleles - {shared_allele}
+
+            # Parent zygosity affects transmission probability
+            if len(candidate_alleles) == 1:
+                # Homozygous parent: must transmit this allele
+                trans_prob = 1.0
+            else:
+                # Heterozygous parent: 50% chance of transmitting this allele
+                trans_prob = 0.5
+
+            # Frequency of the shared allele
+            shared_freq = get_allele_freq(locus, shared_allele)
+
+            # If child is heterozygous, consider the other allele's frequency
+            if non_shared_query:
+                # Child has shared allele from this parent + other allele from other parent
+                # LR = trans_prob / shared_freq
+                lr = trans_prob / max(shared_freq, 0.001)
+            else:
+                # Child appears homozygous for shared allele
+                # Could be: (1) inherited from both parents, (2) dropout of other allele
+                # Be more conservative here
+                lr = trans_prob / max(shared_freq, 0.001)
+
             best_lr = max(best_lr, lr)
+
         return best_lr, "consistent"
 
     # Check for mutation (±1 step difference)
@@ -325,6 +349,7 @@ def match_single(
 
     # Sort by CLR descending and return top 10
     results.sort(key=lambda x: -x["clr"])
+
     return results[:10]
 
 
