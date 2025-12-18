@@ -35,35 +35,93 @@ def match_single(
             ...
         ]
     """
-    # TODO: Replace this dummy with your real matching logic!
-    # Example: return empty list (safe default)
-    return []
+    # ------------------------------
+    # Helper: parse allele strings into a set of floats
+    # ------------------------------
+    def parse_alleles(val):
+        if pd.isna(val):
+            return None
+        if val in ("-", "", None):
+            return None
+        if "," in str(val):
+            return {float(x) for x in str(val).split(",") if x}
+        try:
+            return {float(val)}
+        except ValueError:
+            return None
 
-    # Helpful tip: you can compute a simple score like number of shared alleles
-    # Example skeleton:
-    """
-    candidates = []
-    query_id = query_profile['PersonID']
-    
-    for _, candidate in database_df.iterrows():
-        if candidate['PersonID'] == query_id:
-            continue  # skip self
-        
-        score = your_scoring_function(query_profile, candidate)
-        if score > threshold:
-            candidates.append({
-                "person_id": candidate['PersonID'],
-                "clr": score,
-                "posterior": 0.99,  # optional
-                "consistent_loci": 18,
-                "mutated_loci": 0,
-                "inconclusive_loci": 3
-            })
-    
-    # Sort by CLR descending and take top 10
-    candidates.sort(key=lambda x: x['clr'], reverse=True)
+    # Identify loci columns
+    loci = [col for col in database_df.columns if col != "PersonID"]
+
+    # Pre-parse query alleles for quick lookup
+    query_alleles = {locus: parse_alleles(query_profile.get(locus, "-")) for locus in loci}
+    query_id = query_profile.get("PersonID")
+
+    candidates: List[Dict[str, Any]] = []
+
+    # Iterate through database profiles
+    for row in database_df.itertuples(index=False):
+        candidate_id = getattr(row, "PersonID")
+        if candidate_id == query_id:
+            continue  # skip self-comparison
+
+        consistent_loci = 0
+        mutated_loci = 0
+        inconclusive_loci = 0
+        score = 0.0
+
+        for locus in loci:
+            q_alleles = query_alleles[locus]
+            c_val = getattr(row, locus)
+            c_alleles = parse_alleles(c_val)
+
+            if q_alleles is None or c_alleles is None:
+                inconclusive_loci += 1
+                continue
+
+            shared = q_alleles.intersection(c_alleles)
+            if shared:
+                consistent_loci += 1
+                score += 2.0 + 0.1 * len(shared)
+                continue
+
+            # Allow ±1 repeat mutations
+            mutated_here = False
+            for qa in q_alleles:
+                for ca in c_alleles:
+                    if abs(qa - ca) <= 1.0:
+                        mutated_here = True
+                        break
+                if mutated_here:
+                    break
+
+            if mutated_here:
+                mutated_loci += 1
+                score += 1.0
+            else:
+                score -= 0.5  # penalize complete mismatch
+
+        total_informative = consistent_loci + mutated_loci
+        if total_informative == 0:
+            continue  # no evidence of relatedness
+
+        # Convert simple score to pseudo-CLR and posterior
+        clr = max(score, 0.01)
+        posterior = clr / (clr + 1.0)
+
+        candidates.append(
+            {
+                "person_id": candidate_id,
+                "clr": clr,
+                "posterior": posterior,
+                "consistent_loci": consistent_loci,
+                "mutated_loci": mutated_loci,
+                "inconclusive_loci": inconclusive_loci,
+            }
+        )
+
+    candidates.sort(key=lambda x: x["clr"], reverse=True)
     return candidates[:10]
-    """
 
 
 # ============================================================
