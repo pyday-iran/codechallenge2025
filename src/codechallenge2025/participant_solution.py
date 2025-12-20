@@ -16,8 +16,9 @@ from typing import List, Dict, Any
 # ============================================================
 PARTIAL_MIN = 1
 MISMATCH_MAX = 3
-PARTIAL_BONUS = 1.0
+PARTIAL_BONUS = 1.0  # CHANGED: was 1.0
 PREFILTER_MIN = 5
+IDENTICAL_MAX = 12   # NEW
 
 DEFAULT_FREQ = 0.01
 
@@ -81,7 +82,6 @@ def build_cache(database_df: pd.DataFrame) -> dict:
             allele_freqs[locus] = {}
         allele_freqs[locus][allele] = count / total
     
-    # FIX: The 'return' statement was on a separate line, causing it to return None.
     return {
         "loci": loci,
         "allele_index": allele_index,
@@ -91,7 +91,7 @@ def build_cache(database_df: pd.DataFrame) -> dict:
 
 
 def score_candidate(query_parsed, cand_profile, loci, allele_freqs, 
-                    partial_min, mismatch_max, partial_bonus):
+                    partial_min, mismatch_max, partial_bonus, identical_max):
     """Score a single candidate with given parameters."""
     def get_freq(locus, allele):
         if locus in allele_freqs and allele in allele_freqs[locus]:
@@ -138,12 +138,14 @@ def score_candidate(query_parsed, cand_profile, loci, allele_freqs,
         return None
     if partial_count < partial_min:
         return None
+    if identical_count > identical_max:  # NEW: filter same-person
+        return None
     
     score = total_lr * (1 + partial_count * partial_bonus)
     
-    # FIX: The 'return' statement was also on a separate line here.
     return {
         "clr": score,
+        "partial_count": partial_count,  # NEW: for sorting
         "posterior": partial_count / 21.0,
         "consistent_loci": identical_count + partial_count,
         "mutated_loci": mutation_count,
@@ -195,13 +197,14 @@ def match_single(
     for pid in promising:
         result = score_candidate(
             query_parsed, profiles[pid], loci, allele_freqs,
-            PARTIAL_MIN, MISMATCH_MAX, PARTIAL_BONUS
+            PARTIAL_MIN, MISMATCH_MAX, PARTIAL_BONUS, IDENTICAL_MAX  # Added IDENTICAL_MAX
         )
         if result:
             result["person_id"] = pid
             candidates.append(result)
     
-    candidates.sort(key=lambda x: x["clr"], reverse=True)
+    # Sort by partial_count first, then CLR (prioritizes true parents)
+    candidates.sort(key=lambda x: (x["partial_count"], x["clr"]), reverse=True)
     return candidates[:10]
 
 
