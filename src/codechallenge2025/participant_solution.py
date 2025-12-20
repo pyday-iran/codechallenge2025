@@ -6,64 +6,112 @@ You ONLY need to implement the function: match_single
 
 The find_matches function is provided for you — no need to change it!
 """
-
 import pandas as pd
+import math
 from typing import List, Dict, Any
 
+MUTATION_RATE = 0.002
+MIN_LR = 1e-6
+
+def parse_alleles(val):
+    if pd.isna(val) or val == "-" or val == "":
+        return None
+    return set(float(x) for x in str(val).split(","))
+
+
+def allele_relation(a, b):
+    if a is None or b is None:
+        return "missing"
+    for x in a:
+        for y in b:
+            if x == y:
+                return "match"
+            if abs(x - y) == 1:
+                return "mutation"
+    return "mismatch"
+
+
+def locus_lr(status, allele_freq=0.05):
+    if status == "match":
+        return 1.0 / allele_freq
+    if status == "mutation":
+        return MUTATION_RATE / allele_freq
+    if status == "missing":
+        return 1.0
+    return MIN_LR
+
+
+# ---------- ONLY FUNCTION YOU IMPLEMENT ----------
 
 def match_single(
     query_profile: Dict[str, Any], database_df: pd.DataFrame
 ) -> List[Dict]:
-    """
-    Find the top 10 candidate matches for a SINGLE query profile.
 
-    Args:
-        query_profile: dict with 'PersonID' and locus columns (e.g. {'PersonID': 'Q001', 'TH01': '9,9.3', ...})
-        database_df: Full database as pandas DataFrame (500k rows)
+    # 1) Extract loci and query id
+    loci = [c for c in database_df.columns if c != "PersonID"]
+    query_id = query_profile["PersonID"]
 
-    Returns:
-        List of up to 10 candidate dicts, sorted by strength (best first):
-        [
-            {
-                "person_id": "P000123",
-                "clr": 1e15,                    # Combined Likelihood Ratio
-                "posterior": 0.99999,           # Optional: posterior probability
-                "consistent_loci": 20,
-                "mutated_loci": 1,
-                "inconclusive_loci": 0
-            },
-            ...
-        ]
-    """
-    # TODO: Replace this dummy with your real matching logic!
-    # Example: return empty list (safe default)
-    return []
+    # 2) Parse query profile once
+    query_alleles = {l: parse_alleles(query_profile[l]) for l in loci}
 
-    # Helpful tip: you can compute a simple score like number of shared alleles
-    # Example skeleton:
-    """
+    # 3) Pre-filter candidates (performance critical)
+    informative_loci = [l for l in loci if query_alleles[l] is not None][:5]
+
     candidates = []
-    query_id = query_profile['PersonID']
-    
-    for _, candidate in database_df.iterrows():
-        if candidate['PersonID'] == query_id:
-            continue  # skip self
-        
-        score = your_scoring_function(query_profile, candidate)
-        if score > threshold:
-            candidates.append({
-                "person_id": candidate['PersonID'],
-                "clr": score,
-                "posterior": 0.99,  # optional
-                "consistent_loci": 18,
-                "mutated_loci": 0,
-                "inconclusive_loci": 3
-            })
-    
-    # Sort by CLR descending and take top 10
-    candidates.sort(key=lambda x: x['clr'], reverse=True)
-    return candidates[:10]
-    """
+    for _, row in database_df.iterrows():
+        if row["PersonID"] == query_id:
+            continue
+
+        shared = 0
+        for l in informative_loci:
+            rel = allele_relation(query_alleles[l], parse_alleles(row[l]))
+            if rel in ("match", "mutation"):
+                shared += 1
+
+        if shared >= 2:
+            candidates.append(row)
+
+    # 4) Score candidates using LR in log-space
+    results = []
+
+    for row in candidates:
+        log_lr = 0.0
+        consistent = 0
+        mutated = 0
+        inconclusive = 0
+
+        for l in loci:
+            qa = query_alleles[l]
+            da = parse_alleles(row[l])
+            status = allele_relation(qa, da)
+
+            if status == "match":
+                consistent += 1
+            elif status == "mutation":
+                mutated += 1
+            elif status == "missing":
+                inconclusive += 1
+
+            log_lr += math.log(locus_lr(status))
+
+        clr = math.exp(log_lr)
+        posterior = clr / (clr + 1)
+
+        results.append(
+            {
+                "person_id": row["PersonID"],
+                "clr": clr,
+                "posterior": posterior,
+                "consistent_loci": consistent,
+                "mutated_loci": mutated,
+                "inconclusive_loci": inconclusive,
+            }
+        )
+
+    # 5) Sort and return top 10
+    results.sort(key=lambda x: x["clr"], reverse=True)
+    return results[:10]
+
 
 
 # ============================================================
