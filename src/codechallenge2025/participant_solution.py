@@ -14,6 +14,7 @@ from typing import List, Dict, Any
 def match_single(
     query_profile: Dict[str, Any], database_df: pd.DataFrame
 ) -> List[Dict]:
+    import numpy as np
     """
     Find the top 10 candidate matches for a SINGLE query profile.
 
@@ -35,35 +36,38 @@ def match_single(
             ...
         ]
     """
-    # TODO: Replace this dummy with your real matching logic!
-    # Example: return empty list (safe default)
-    return []
 
-    # Helpful tip: you can compute a simple score like number of shared alleles
-    # Example skeleton:
-    """
-    candidates = []
-    query_id = query_profile['PersonID']
+    users = database_df["PersonID"]
+
+    def split_df(_df):
+        df = _df.copy()
+        df_2 = _df.copy()
+        for col in df.columns[1:]:
+            df[col] += ","
+            df_2[col] = df[col].str.split(",", expand=True)[0].replace("-", np.nan).astype(float)
+            df[col] = df[col].str.split(",", expand=True)[1]
+            df.loc[df[col] == "", col] = df_2.loc[df[col] == "", col]
+            df[col] = df[col].replace("-", np.nan).astype(float)
+        df.drop("PersonID", axis=1, inplace=True)
+        df_2.drop("PersonID", axis=1, inplace=True)
+        return df, df_2
     
-    for _, candidate in database_df.iterrows():
-        if candidate['PersonID'] == query_id:
-            continue  # skip self
-        
-        score = your_scoring_function(query_profile, candidate)
-        if score > threshold:
-            candidates.append({
-                "person_id": candidate['PersonID'],
-                "clr": score,
-                "posterior": 0.99,  # optional
-                "consistent_loci": 18,
-                "mutated_loci": 0,
-                "inconclusive_loci": 3
-            })
-    
-    # Sort by CLR descending and take top 10
-    candidates.sort(key=lambda x: x['clr'], reverse=True)
-    return candidates[:10]
-    """
+    q, q_2 = split_df(pd.DataFrame([query_profile]))
+
+    df, df_2 = split_df(database_df)
+    m1 = (df - q.iloc[0]).abs()
+    m2 = (df - q_2.iloc[0]).abs()
+    m3 = (df_2 - q.iloc[0]).abs()
+    m4 = (df_2 - q_2.iloc[0]).abs()
+
+    score = ((m1 == 0) | (m2 == 0) | (m3 == 0) | (m4 == 0)).sum(axis=1) + (
+        ((m1 == 1) | (m2 == 1) | (m3 == 1) | (m4 == 1)).sum(axis=1) * 0.002
+    )
+
+    return [{
+        "person_id": users[index],
+        "clr": score[index],
+    } for index in np.argsort(score)[::-1][:10]]
 
 
 # ============================================================
