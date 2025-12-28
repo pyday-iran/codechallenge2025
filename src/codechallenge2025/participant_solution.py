@@ -12,72 +12,58 @@ from typing import List, Dict, Any
 
 
 def match_single(
-    query_profile: Dict[str, Any], database_df: pd.DataFrame) -> List[Dict]:
-    query_id = query_profile["PersonID"]
+    query_profile: Dict[str, Any], database_df: pd.DataFrame
+) -> List[Dict]:
+    """
+    Find the top 10 candidate matches for a SINGLE query profile.
 
-    loci = [
-        col
-        for col in database_df.columns
-        if col != "PersonID"
-    ]
+    Args:
+        query_profile: dict with 'PersonID' and locus columns (e.g. {'PersonID': 'Q001', 'TH01': '9,9.3', ...})
+        database_df: Full database as pandas DataFrame (500k rows)
 
-    def parse_alleles(value: Any) -> set:
-        if pd.isna(value):
-            return set()
-        if isinstance(value, (int, float)):
-            return {str(value)}
-        text = str(value).strip()
-        if not text:
-            return set()
-        return {a.strip() for a in text.split(",") if a.strip()}
-
-    query_alleles = {
-        locus: parse_alleles(query_profile.get(locus, ""))
-        for locus in loci
-    }
-
-    candidates: List[Dict] = []
-
-    for _, row in database_df.iterrows():
-        person_id = row["PersonID"]
-        if person_id == query_id:
-            continue
-
-        consistent_loci = 0
-        inconclusive_loci = 0
-
-        for locus in loci:
-            q_set = query_alleles.get(locus, set())
-            d_set = parse_alleles(row.get(locus, ""))
-
-            if not q_set or not d_set:
-                inconclusive_loci += 1
-                continue
-
-            if q_set & d_set:
-                consistent_loci += 1
-            else:
-                inconclusive_loci += 1
-
-        if consistent_loci == 0:
-            continue
-
-        clr = float(consistent_loci)
-        posterior = min(0.999999, 1.0 - 1e-6 / (1.0 + clr))
-
-        candidates.append(
+    Returns:
+        List of up to 10 candidate dicts, sorted by strength (best first):
+        [
             {
-                "person_id": person_id,
-                "clr": clr,
-                "posterior": posterior,
-                "consistent_loci": consistent_loci,
-                "mutated_loci": 0,
-                "inconclusive_loci": inconclusive_loci,
-            }
-        )
+                "person_id": "P000123",
+                "clr": 1e15,                    # Combined Likelihood Ratio
+                "posterior": 0.99999,           # Optional: posterior probability
+                "consistent_loci": 20,
+                "mutated_loci": 1,
+                "inconclusive_loci": 0
+            },
+            ...
+        ]
+    """
+    # TODO: Replace this dummy with your real matching logic!
+    # Example: return empty list (safe default)
+    return []
 
-    candidates.sort(key=lambda x: x["clr"], reverse=True)
+    # Helpful tip: you can compute a simple score like number of shared alleles
+    # Example skeleton:
+    """
+    candidates = []
+    query_id = query_profile['PersonID']
+    
+    for _, candidate in database_df.iterrows():
+        if candidate['PersonID'] == query_id:
+            continue  # skip self
+        
+        score = your_scoring_function(query_profile, candidate)
+        if score > threshold:
+            candidates.append({
+                "person_id": candidate['PersonID'],
+                "clr": score,
+                "posterior": 0.99,  # optional
+                "consistent_loci": 18,
+                "mutated_loci": 0,
+                "inconclusive_loci": 3
+            })
+    
+    # Sort by CLR descending and take top 10
+    candidates.sort(key=lambda x: x['clr'], reverse=True)
     return candidates[:10]
+    """
 
 
 # ============================================================
